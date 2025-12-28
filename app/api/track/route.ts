@@ -3,42 +3,40 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
 export async function POST(request: Request) {
   try {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      throw new Error('Missing Supabase Environment Variables');
-    }
-
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-    );
-
     const body = await request.json();
 
-    // Capture visitor details
+    // 1. Check if a Tracker ID was sent
+    if (!body.tracker_id) {
+      return NextResponse.json({ success: false, error: 'Missing tracker_id' }, { status: 400 });
+    }
+
     const ip = request.headers.get('x-forwarded-for') || 'Unknown IP';
     const userAgent = request.headers.get('user-agent') || 'Unknown Device';
     const country = request.headers.get('x-vercel-ip-country') || 'Unknown';
-    
-    // CAPTURE REFERRER (Where they came from)
     const referer = request.headers.get('referer') || 'Direct / Unknown';
 
     const { error } = await supabase
       .from('visits')
       .insert({
+        tracker_id: body.tracker_id, // Save the ID!
         url: body.url,
         ip: ip,
         user_agent: userAgent,
         country: country,
-        referer: referer // Save the new field
+        referer: referer
       });
 
     if (error) throw error;
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Supabase Error:', error);
     return NextResponse.json({ success: false }, { status: 500 });
   }
 }

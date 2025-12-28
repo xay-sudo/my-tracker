@@ -1,0 +1,149 @@
+'use client';
+
+import { createClient } from '@supabase/supabase-js';
+import { useEffect, useState, useMemo } from 'react';
+import { formatDistanceStrict } from 'date-fns';
+import { useParams } from 'next/navigation'; // To get the ID from URL
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+const getFlagEmoji = (countryCode: string) => { /* ... same as before (optional fallback) ... */ return '🌍'; };
+const getSource = (referer: string) => {
+  if (!referer || referer === 'Direct / Unknown') return { name: 'Direct', icon: '🔗' };
+  const ref = referer.toLowerCase();
+  if (ref.includes('facebook')) return { name: 'Facebook', icon: '🟦' };
+  if (ref.includes('t.co') || ref.includes('twitter')) return { name: 'X / Twitter', icon: '⬛' };
+  if (ref.includes('telegram')) return { name: 'Telegram', icon: '✈️' };
+  if (ref.includes('google')) return { name: 'Google', icon: '🔍' };
+  return { name: 'Web Ref', icon: '🌐' };
+};
+
+export default function UserDashboard() {
+  const params = useParams();
+  const TRACKER_ID = params.id; // Get the ID from the URL (e.g., '123456')
+
+  const [visits, setVisits] = useState<any[]>([]);
+  const [now, setNow] = useState(new Date());
+
+  const fetchInitialData = async () => {
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+    // FETCH ONLY FOR THIS TRACKER ID
+    const { data } = await supabase
+      .from('visits')
+      .select('*')
+      .eq('tracker_id', TRACKER_ID) // <--- The Important Filter
+      .gt('created_at', tenMinutesAgo)
+      .order('created_at', { ascending: false });
+
+    if (data) setVisits(data);
+  };
+
+  useEffect(() => {
+    if (!TRACKER_ID) return;
+
+    fetchInitialData();
+    const interval = setInterval(() => setNow(new Date()), 1000);
+
+    const channel = supabase
+      .channel(`room_${TRACKER_ID}`) // Unique channel for this user
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'visits',
+          filter: `tracker_id=eq.${TRACKER_ID}` // Listen ONLY for this ID
+        },
+        (payload) => {
+          setVisits((prev) => [payload.new, ...prev]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+    };
+  }, [TRACKER_ID]);
+
+  const onlineCount = useMemo(() => {
+    const fiveMinutesAgo = now.getTime() - 5 * 60 * 1000;
+    return visits.filter(v => new Date(v.created_at).getTime() > fiveMinutesAgo).length;
+  }, [visits, now]);
+
+  // Code snippet for the user to copy
+  const snippet = `<script>
+  fetch('https://${typeof window !== 'undefined' ? window.location.host : 'YOUR-DOMAIN'}/api/track', {
+    method: 'POST',
+    body: JSON.stringify({
+      url: window.location.href,
+      tracker_id: '${TRACKER_ID}'
+    })
+  });
+</script>`;
+
+  return (
+    <main className="min-h-screen bg-black text-white font-sans p-6 flex flex-col items-center">
+
+      {/* Header with ID */}
+      <div className="w-full max-w-5xl flex justify-between items-center mb-8">
+        <h1 className="text-2xl font-bold text-green-500">Tracker #{TRACKER_ID}</h1>
+        <a href="/" className="text-gray-500 hover:text-white text-sm">Create New</a>
+      </div>
+
+      {/* --- INSTALLATION CODE --- */}
+      <div className="w-full max-w-5xl bg-gray-900 border border-gray-700 rounded-lg p-6 mb-8">
+        <h3 className="text-white font-bold mb-2">How to install:</h3>
+        <p className="text-gray-400 text-sm mb-2">Paste this code into your website's <code>&lt;head&gt;</code> tag:</p>
+        <div className="bg-black p-4 rounded border border-gray-800 font-mono text-xs text-green-400 break-all select-all">
+          {snippet}
+        </div>
+      </div>
+
+      {/* --- LIVE COUNTER --- */}
+      <div className="w-full max-w-5xl mb-8 bg-gray-900 border border-gray-800 rounded-2xl p-8 flex items-center justify-between shadow-2xl">
+        <div>
+          <h2 className="text-gray-400 text-sm uppercase tracking-widest font-bold">Right Now</h2>
+          <div className="flex items-baseline gap-2 mt-2">
+            <span className="text-6xl font-bold text-white">{onlineCount}</span>
+            <span className="text-green-500 font-medium animate-pulse">● Online</span>
+          </div>
+        </div>
+      </div>
+
+      {/* --- LIVE TABLE --- */}
+      <div className="w-full max-w-5xl bg-gray-900/50 border border-gray-800 rounded-xl overflow-hidden">
+        <div className="p-4 border-b border-gray-800 bg-gray-900">
+           <h3 className="font-semibold text-gray-200">Live Traffic</h3>
+        </div>
+        <table className="w-full text-left">
+            <tbody className="divide-y divide-gray-800 text-sm">
+              {visits.slice(0, 20).map((visit) => (
+                <tr key={visit.id} className="hover:bg-gray-800/50">
+                   <td className="p-4 text-green-400 font-mono">
+                     {formatDistanceStrict(new Date(visit.created_at), now, { addSuffix: true })}
+                   </td>
+                   <td className="p-4 text-white flex items-center gap-2">
+                     {visit.country ? (
+                        <img
+                          src={`https://flagcdn.com/24x18/${visit.country.toLowerCase()}.png`}
+                          width="24" height="18" alt={visit.country} className="rounded-sm"
+                        />
+                      ) : '🌍'}
+                      {visit.country || 'Unknown'}
+                   </td>
+                   <td className="p-4 text-blue-300">
+                     {getSource(visit.referer).name}
+                   </td>
+                </tr>
+              ))}
+            </tbody>
+        </table>
+      </div>
+    </main>
+  );
+}
