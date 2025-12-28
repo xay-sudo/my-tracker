@@ -3,12 +3,24 @@ import { formatDistanceToNow } from 'date-fns';
 
 export const dynamic = 'force-dynamic';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
 export default async function Dashboard() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+  // Return an error view if keys are missing
+  if (!supabaseUrl || !supabaseKey) {
+    return (
+      <main className="p-8 bg-black min-h-screen text-white flex items-center justify-center">
+        <div className="text-red-500 text-center">
+          <h1 className="text-2xl font-bold">Configuration Error</h1>
+          <p>Missing Supabase Environment Variables in Vercel Settings.</p>
+        </div>
+      </main>
+    );
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
   const { data: visits } = await supabase
     .from('visits')
     .select('*')
