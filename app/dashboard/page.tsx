@@ -23,6 +23,7 @@ const getSource = (referer: string) => {
   if (ref.includes('youtube')) return { name: 'YouTube', icon: '🟥' };
   if (ref.includes('google')) return { name: 'Google', icon: '🔍' };
   if (ref.includes('tiktok')) return { name: 'TikTok', icon: '🎵' };
+  if (ref.includes('bing')) return { name: 'Bing', icon: '🔎' };
 
   return { name: 'Web Ref', icon: '🌐' };
 };
@@ -44,6 +45,7 @@ export default function UserDashboard() {
   }, []);
 
   const fetchInitialData = async () => {
+    // Only fetch last 10 minutes to keep it fast
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
     // FETCH ONLY DATA FOR THIS ID
@@ -126,24 +128,36 @@ export default function UserDashboard() {
         </a>
       </div>
 
-      {/* --- INSTALLATION INSTRUCTIONS --- */}
-      <div className="w-full max-w-5xl bg-gray-900 border border-gray-700 rounded-lg p-6 mb-8 shadow-lg">
-        <h3 className="text-white font-bold mb-2 flex items-center gap-2">
-          <span>📋</span> Installation Code
-        </h3>
+      {/* --- INSTALLATION INSTRUCTIONS (With Copy Button) --- */}
+      <div className="w-full max-w-5xl bg-gray-900 border border-gray-700 rounded-lg p-6 mb-8 shadow-lg relative overflow-hidden">
+
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="text-white font-bold flex items-center gap-2">
+            <span>📋</span> Installation Code
+          </h3>
+          {/* THE COPY BUTTON */}
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(snippet);
+              alert('Code copied to clipboard! ✅');
+            }}
+            className="px-3 py-1 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded transition-colors flex items-center gap-1"
+          >
+            Copy Code
+          </button>
+        </div>
+
         <p className="text-gray-400 text-sm mb-3">
-          Paste this code into the <code>&lt;head&gt;</code> or <code>&lt;footer&gt;</code> of your website (WordPress, HTML, etc.).
+          Paste this code into the <code>&lt;head&gt;</code> or <code>&lt;footer&gt;</code> of your website (WordPress, Wix, HTML).
         </p>
+
         <div className="relative group">
           <textarea
             readOnly
-            className="w-full h-32 bg-black p-4 rounded border border-gray-800 font-mono text-xs text-green-400 focus:outline-none focus:border-green-500 resize-none"
+            className="w-full h-32 bg-black p-4 rounded border border-gray-800 font-mono text-xs text-green-400 focus:outline-none focus:border-green-500 resize-none cursor-pointer"
             value={snippet}
-            onClick={(e) => e.currentTarget.select()}
+            onClick={(e) => e.currentTarget.select()} // Auto-select on click
           />
-          <div className="absolute top-2 right-2 text-xs text-gray-600 bg-black px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-            Click to Select
-          </div>
         </div>
       </div>
 
