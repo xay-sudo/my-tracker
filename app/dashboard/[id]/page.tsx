@@ -123,7 +123,7 @@ export default function UserDashboard() {
         <h1 className="text-2xl font-bold text-green-500 flex items-center gap-2">
           <span className="text-3xl">⚡</span> Tracker #{TRACKER_ID}
         </h1>
-        <a href="/" className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded text-sm text-gray-300 transition-colors">
+        <a href="/public" className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded text-sm text-gray-300 transition-colors">
           + Create New
         </a>
       </div>
