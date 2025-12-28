@@ -1,16 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
-export const dynamic = 'force-dynamic'; // Prevents static analysis errors
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
-    // 1. Check for keys inside the function to prevent build crashes
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
       throw new Error('Missing Supabase Environment Variables');
     }
 
-    // 2. Initialize Supabase only when needed
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -18,9 +16,13 @@ export async function POST(request: Request) {
 
     const body = await request.json();
 
+    // Capture visitor details
     const ip = request.headers.get('x-forwarded-for') || 'Unknown IP';
     const userAgent = request.headers.get('user-agent') || 'Unknown Device';
     const country = request.headers.get('x-vercel-ip-country') || 'Unknown';
+    
+    // CAPTURE REFERRER (Where they came from)
+    const referer = request.headers.get('referer') || 'Direct / Unknown';
 
     const { error } = await supabase
       .from('visits')
@@ -28,7 +30,8 @@ export async function POST(request: Request) {
         url: body.url,
         ip: ip,
         user_agent: userAgent,
-        country: country
+        country: country,
+        referer: referer // Save the new field
       });
 
     if (error) throw error;
