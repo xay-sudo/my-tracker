@@ -1,14 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // 1. Ignore TypeScript Errors during build
+  // Keep this to ignore Type errors
   typescript: {
     ignoreBuildErrors: true,
   },
-  // 2. Ignore ESLint Errors during build
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
+  // ❌ REMOVED the 'eslint' block because it causes the error
 };
 
 export default nextConfig;
