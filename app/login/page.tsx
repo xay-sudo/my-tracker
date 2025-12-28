@@ -19,49 +19,77 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
-  // --- LISTEN FOR SESSION ---
+  // --- 1. CRITICAL: SESSION LISTENER ---
+  // This waits for Google to send the user back, catches the token, and redirects.
   useEffect(() => {
     const checkSession = async () => {
+      // Check if session exists immediately (e.g. after Google redirect)
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) router.push('/dashboard');
+      if (session) {
+        router.replace('/dashboard'); // Use replace to prevent "Back" button loops
+      }
     };
+
     checkSession();
 
+    // Listen for realtime auth changes (Login success, Google success, etc.)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session) {
-        router.push('/dashboard');
-        router.refresh();
+        router.replace('/dashboard');
       }
     });
 
     return () => subscription.unsubscribe();
   }, [router]);
 
-  // --- 1. HANDLE LOGIN & SIGN UP ---
+  // --- 2. HANDLE EMAIL AUTH ---
   const handleAuth = async (e: any) => {
     e.preventDefault();
     setLoading(true);
     setMessage('');
 
     if (view === 'signup') {
+      // Sign Up
       const { error } = await supabase.auth.signUp({ email, password });
-      if (error) setMessage('Error: ' + error.message);
-      else setMessage('✅ Account created! Logging you in...');
+      if (error) {
+        setMessage('Error: ' + error.message);
+      } else {
+        setMessage('✅ Account created! Logging you in...');
+        // The useEffect above will handle the redirect
+      }
     } else {
+      // Login
       const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setMessage('Error: ' + error.message);
+      if (error) {
+        setMessage('Error: ' + error.message);
+      }
+      // If success, the useEffect above handles the redirect
     }
     setLoading(false);
   };
 
-  // --- 2. HANDLE PASSWORD RESET ---
+  // --- 3. HANDLE GOOGLE LOGIN ---
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        // IMPORTANT: Redirect back to /login first so the listener captures the token
+        redirectTo: `${window.location.origin}/login`,
+      },
+    });
+    if (error) setMessage(error.message);
+    setLoading(false);
+  };
+
+  // --- 4. HANDLE PASSWORD RESET ---
   const handleResetPassword = async (e: any) => {
     e.preventDefault();
     setLoading(true);
     setMessage('');
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/update-password`, // Where to go after clicking email
+      redirectTo: `${window.location.origin}/update-password`,
     });
 
     if (error) {
@@ -72,21 +100,11 @@ export default function LoginPage() {
     setLoading(false);
   };
 
-  // --- 3. HANDLE GOOGLE LOGIN ---
-  const handleGoogleLogin = async () => {
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: `${window.location.origin}/dashboard` },
-    });
-    if (error) setMessage(error.message);
-  };
-
   return (
     <main className="min-h-screen bg-black text-white flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-gray-900 border border-gray-800 p-8 rounded-xl shadow-2xl relative overflow-hidden">
 
-        {/* Title Changes Based on View */}
+        {/* Title */}
         <h1 className="text-3xl font-bold text-center mb-2 text-white">
           {view === 'signup' ? 'Create Account' : view === 'forgot_password' ? 'Reset Password' : 'Welcome Back'}
         </h1>
@@ -96,16 +114,16 @@ export default function LoginPage() {
             : 'Sign in to manage your trackers'}
         </p>
 
+        {/* Error/Success Message */}
         {message && (
           <div className={`p-3 rounded mb-6 text-center border text-sm ${message.includes('Error') ? 'bg-red-900/30 text-red-400 border-red-900' : 'bg-green-900/30 text-green-400 border-green-900'}`}>
             {message}
           </div>
         )}
 
-        {/* --- FORM AREA --- */}
         <div className="flex flex-col gap-4">
 
-          {/* Google Button (Hide if resetting password) */}
+          {/* Google Button (Only show on Login/Signup views) */}
           {view !== 'forgot_password' && (
             <>
               <button
@@ -125,7 +143,7 @@ export default function LoginPage() {
             </>
           )}
 
-          {/* Login/Signup/Reset Form */}
+          {/* Main Form */}
           <form onSubmit={view === 'forgot_password' ? handleResetPassword : handleAuth} className="flex flex-col gap-4">
             <input
               type="email"
@@ -136,7 +154,7 @@ export default function LoginPage() {
               required
             />
 
-            {/* Password Input (Hidden during reset) */}
+            {/* Password Field (Hidden in Forgot Password view) */}
             {view !== 'forgot_password' && (
               <input
                 type="password"
@@ -157,10 +175,9 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* --- BOTTOM NAVIGATION LINKS --- */}
+          {/* Toggle Links */}
           <div className="text-center text-gray-500 text-sm mt-4 flex flex-col gap-2">
 
-            {/* If in Login Mode */}
             {view === 'login' && (
               <>
                 <button onClick={() => setView('forgot_password')} className="hover:text-white transition-colors">
@@ -175,7 +192,6 @@ export default function LoginPage() {
               </>
             )}
 
-            {/* If in Signup Mode */}
             {view === 'signup' && (
               <p>
                 Already have an account?{' '}
@@ -185,7 +201,6 @@ export default function LoginPage() {
               </p>
             )}
 
-            {/* If in Forgot Password Mode */}
             {view === 'forgot_password' && (
               <button onClick={() => { setView('login'); setMessage(''); }} className="text-green-500 hover:underline font-bold">
                 ← Back to Login
