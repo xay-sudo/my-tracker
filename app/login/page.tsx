@@ -19,13 +19,16 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
 
-    // Magic Link Login (Passwordless)
-    const { error } = await supabase.auth.signInWithOtp({ email });
+    // Magic Link Login (Passwordless - Easiest setup)
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/dashboard` }
+    });
 
     if (error) {
       setMessage('Error: ' + error.message);
     } else {
-      setMessage('Check your email for the login link!');
+      setMessage('✅ Check your email for the login link!');
     }
     setLoading(false);
   };
@@ -33,7 +36,7 @@ export default function Login() {
   return (
     <main className="min-h-screen bg-black text-white flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-gray-900 border border-gray-800 p-8 rounded-xl shadow-2xl">
-        <h1 className="text-2xl font-bold text-center mb-6">Welcome Back</h1>
+        <h1 className="text-2xl font-bold text-center mb-6 text-green-500">Tracker Login</h1>
 
         {message ? (
           <div className="bg-green-900/50 text-green-300 p-4 rounded mb-4 text-center border border-green-800">

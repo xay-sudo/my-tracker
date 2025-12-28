@@ -1,133 +1,272 @@
 'use client';
 
 import { createClient } from '@supabase/supabase-js';
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState, useMemo } from 'react';
+import { formatDistanceStrict } from 'date-fns';
+import { useParams } from 'next/navigation';
 
+// Initialize Supabase
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export default function DashboardManager() {
-  const router = useRouter();
-  const [trackers, setTrackers] = useState<any[]>([]);
-  const [newSiteName, setNewSiteName] = useState('');
-  const [user, setUser] = useState<any>(null);
+// --- HELPER: Identify Source Icon ---
+const getSource = (referer: string) => {
+  if (!referer || referer === 'Direct / Unknown') return { name: 'Direct', icon: '🔗' };
 
+  const ref = referer.toLowerCase();
+  if (ref.includes('facebook')) return { name: 'Facebook', icon: '🟦' };
+  if (ref.includes('t.co') || ref.includes('twitter') || ref.includes('x.com')) return { name: 'X / Twitter', icon: '⬛' };
+  if (ref.includes('instagram')) return { name: 'Instagram', icon: '📸' };
+  if (ref.includes('telegram') || ref.includes('t.me')) return { name: 'Telegram', icon: '✈️' };
+  if (ref.includes('youtube')) return { name: 'YouTube', icon: '🟥' };
+  if (ref.includes('google')) return { name: 'Google', icon: '🔍' };
+  if (ref.includes('tiktok')) return { name: 'TikTok', icon: '🎵' };
+  if (ref.includes('bing')) return { name: 'Bing', icon: '🔎' };
+
+  return { name: 'Web Ref', icon: '🌐' };
+};
+
+export default function UserDashboard() {
+  const params = useParams();
+  // Get the Tracker ID from the URL (e.g. "829312")
+  const TRACKER_ID = params.id as string;
+
+  const [visits, setVisits] = useState<any[]>([]);
+  const [now, setNow] = useState(new Date());
+  const [origin, setOrigin] = useState('');
+
+  // Set the domain origin for the snippet (client-side only)
   useEffect(() => {
-    checkUser();
+    if (typeof window !== 'undefined') {
+      setOrigin(window.location.origin);
+    }
   }, []);
 
-  const checkUser = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      router.push('/login'); // Redirect if not logged in
-    } else {
-      setUser(user);
-      fetchTrackers(user.id);
-    }
-  };
+  const fetchInitialData = async () => {
+    // Only fetch last 10 minutes to keep it fast
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
-  const fetchTrackers = async (userId: string) => {
+    // FETCH ONLY DATA FOR THIS ID
     const { data } = await supabase
-      .from('trackers')
+      .from('visits')
       .select('*')
-      .eq('user_id', userId)
+      .eq('tracker_id', TRACKER_ID)
+      .gt('created_at', tenMinutesAgo)
       .order('created_at', { ascending: false });
-    if (data) setTrackers(data);
+
+    if (data) setVisits(data);
   };
 
-  const createTracker = async () => {
-    if (!newSiteName) return;
-    const randomId = Math.floor(100000 + Math.random() * 900000).toString();
+  useEffect(() => {
+    if (!TRACKER_ID) return;
 
-    const { error } = await supabase
-      .from('trackers')
-      .insert({
-        id: randomId,
-        user_id: user.id,
-        name: newSiteName
-      });
+    fetchInitialData();
 
-    if (!error) {
-      setNewSiteName('');
-      fetchTrackers(user.id); // Refresh list
-    }
-  };
+    // Update "Time Ago" every second
+    const interval = setInterval(() => setNow(new Date()), 1000);
 
-  const deleteTracker = async (id: string) => {
-    if(!confirm('Are you sure you want to delete this tracker?')) return;
+    // Subscribe to Real-time changes for this specific ID
+    const channel = supabase
+      .channel(`room_${TRACKER_ID}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'visits',
+          filter: `tracker_id=eq.${TRACKER_ID}` // <--- Critical Filter
+        },
+        (payload) => {
+          setVisits((prev) => [payload.new, ...prev]);
+        }
+      )
+      .subscribe();
 
-    await supabase.from('trackers').delete().eq('id', id);
-    fetchTrackers(user.id);
-  };
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(interval);
+    };
+  }, [TRACKER_ID]);
+
+  // Calculate "Online Now" (Active in last 5 minutes)
+  const onlineCount = useMemo(() => {
+    const fiveMinutesAgo = now.getTime() - 5 * 60 * 1000;
+    return visits.filter(v => new Date(v.created_at).getTime() > fiveMinutesAgo).length;
+  }, [visits, now]);
+
+  // The Script for users to copy
+  const snippet = `<script>
+(function() {
+  var tracker_id = '${TRACKER_ID}';
+  var url = window.location.href;
+  var ref = document.referrer;
+  
+  fetch('${origin}/api/track', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ 
+      tracker_id: tracker_id,
+      url: url,
+      referrer: ref
+    })
+  }).catch(err => console.log('Tracker Error:', err));
+})();
+</script>`;
 
   return (
-    <main className="min-h-screen bg-black text-white p-8">
-      <div className="max-w-4xl mx-auto">
+    <main className="min-h-screen bg-black text-white font-sans p-6 flex flex-col items-center">
 
-        {/* Header */}
-        <div className="flex justify-between items-center mb-12">
-          <h1 className="text-3xl font-bold text-green-500">My Websites</h1>
+      {/* Header */}
+      <div className="w-full max-w-5xl flex justify-between items-center mb-8 border-b border-gray-800 pb-4">
+        <h1 className="text-2xl font-bold text-green-500 flex items-center gap-2">
+          <span className="text-3xl">⚡</span> Tracker #{TRACKER_ID}
+        </h1>
+        <a href="/public" className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded text-sm text-gray-300 transition-colors">
+          + Create New
+        </a>
+      </div>
+
+      {/* --- INSTALLATION INSTRUCTIONS (With Copy Button) --- */}
+      <div className="w-full max-w-5xl bg-gray-900 border border-gray-700 rounded-lg p-6 mb-8 shadow-lg relative overflow-hidden">
+
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="text-white font-bold flex items-center gap-2">
+            <span>📋</span> Installation Code
+          </h3>
+          {/* THE COPY BUTTON */}
           <button
-            onClick={() => supabase.auth.signOut().then(() => router.push('/'))}
-            className="text-gray-400 hover:text-white text-sm"
+            onClick={() => {
+              navigator.clipboard.writeText(snippet);
+              alert('Code copied to clipboard! ✅');
+            }}
+            className="px-3 py-1 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded transition-colors flex items-center gap-1"
           >
-            Sign Out
+            Copy Code
           </button>
         </div>
 
-        {/* Create New Section */}
-        <div className="bg-gray-900 border border-gray-800 p-6 rounded-xl mb-8 flex gap-4 items-center">
-          <input
-            type="text"
-            placeholder="Website Name (e.g. My Portfolio)"
-            className="flex-1 bg-black border border-gray-700 p-3 rounded text-white focus:border-green-500 outline-none"
-            value={newSiteName}
-            onChange={(e) => setNewSiteName(e.target.value)}
+        <p className="text-gray-400 text-sm mb-3">
+          Paste this code into the <code>&lt;head&gt;</code> or <code>&lt;footer&gt;</code> of your website (WordPress, Wix, HTML).
+        </p>
+
+        <div className="relative group">
+          <textarea
+            readOnly
+            className="w-full h-32 bg-black p-4 rounded border border-gray-800 font-mono text-xs text-green-400 focus:outline-none focus:border-green-500 resize-none cursor-pointer"
+            value={snippet}
+            onClick={(e) => e.currentTarget.select()} // Auto-select on click
           />
-          <button
-            onClick={createTracker}
-            className="bg-green-600 hover:bg-green-500 px-6 py-3 rounded font-bold transition-colors"
-          >
-            + Add Site
-          </button>
+        </div>
+      </div>
+
+      {/* --- BIG LIVE COUNTER --- */}
+      <div className="w-full max-w-5xl mb-8 flex flex-col md:flex-row gap-4">
+        <div className="flex-1 bg-gray-900 border border-gray-800 rounded-2xl p-8 flex items-center justify-between shadow-2xl shadow-green-900/10">
+          <div>
+            <h2 className="text-gray-400 text-sm uppercase tracking-widest font-bold">People Online</h2>
+            <div className="flex items-baseline gap-2 mt-2">
+              <span className="text-6xl font-bold text-white tabular-nums">{onlineCount}</span>
+              <span className="text-green-500 font-medium animate-pulse text-sm uppercase tracking-wider">● Live Now</span>
+            </div>
+            <p className="text-gray-600 text-sm mt-2">Active in the last 5 minutes</p>
+          </div>
+
+          {/* Simple Animated Graph Bar */}
+          <div className="hidden md:flex gap-1 items-end h-16 opacity-40">
+             {[...Array(12)].map((_, i) => (
+                <div key={i} className="w-2 bg-green-500 rounded-sm animate-pulse"
+                     style={{
+                       height: `${20 + Math.random() * 80}%`,
+                       animationDelay: `${i * 0.1}s`
+                     }}>
+                </div>
+             ))}
+          </div>
+        </div>
+      </div>
+
+      {/* --- LIVE FEED TABLE --- */}
+      <div className="w-full max-w-5xl bg-gray-900/50 border border-gray-800 rounded-xl overflow-hidden backdrop-blur-sm">
+        <div className="p-4 border-b border-gray-800 bg-gray-900 flex justify-between items-center">
+           <h3 className="font-semibold text-gray-200">Real-Time Traffic Feed</h3>
+           <div className="flex items-center gap-2">
+             <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+             <span className="text-xs text-green-400 uppercase font-bold tracking-wider">Live</span>
+           </div>
         </div>
 
-        {/* List of Sites */}
-        <div className="grid gap-4">
-          {trackers.map((tracker) => (
-            <div key={tracker.id} className="bg-gray-900/50 border border-gray-800 p-6 rounded-xl flex justify-between items-center hover:border-gray-700 transition-colors">
-              <div>
-                <h3 className="text-xl font-bold mb-1">{tracker.name}</h3>
-                <p className="text-gray-500 text-sm font-mono">ID: {tracker.id}</p>
-              </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead className="bg-gray-900 text-gray-500 text-xs uppercase">
+              <tr>
+                <th className="p-4 font-medium">Time Ago</th>
+                <th className="p-4 font-medium">Location</th>
+                <th className="p-4 font-medium">Source</th>
+                <th className="p-4 font-medium">Device</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800 text-sm">
+              {visits.slice(0, 20).map((visit) => {
+                const source = getSource(visit.referer);
+                return (
+                  <tr key={visit.id} className="hover:bg-gray-800/50 transition-colors">
+                    {/* Time */}
+                    <td className="p-4 text-green-400 font-mono whitespace-nowrap tabular-nums">
+                      {formatDistanceStrict(new Date(visit.created_at), now, { addSuffix: true })}
+                    </td>
 
-              <div className="flex gap-4">
-                <button
-                  onClick={() => router.push(`/dashboard/${tracker.id}`)}
-                  className="bg-blue-600/20 text-blue-400 border border-blue-600/50 px-4 py-2 rounded hover:bg-blue-600/30"
-                >
-                  View Stats
-                </button>
-                <button
-                  onClick={() => deleteTracker(tracker.id)}
-                  className="text-red-500 hover:text-red-400 p-2"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          ))}
+                    {/* Country with Flag Image */}
+                    <td className="p-4 text-white">
+                      <div className="flex items-center gap-3">
+                        {visit.country && visit.country !== 'Unknown' ? (
+                            <img
+                              src={`https://flagcdn.com/24x18/${visit.country.toLowerCase()}.png`}
+                              srcSet={`https://flagcdn.com/48x36/${visit.country.toLowerCase()}.png 2x`}
+                              width="24" height="18"
+                              alt={visit.country}
+                              className="rounded-sm shadow-sm"
+                            />
+                        ) : (
+                            <span className="text-xl">🌍</span>
+                        )}
+                        <span className="font-medium text-gray-300">{visit.country || 'Unknown'}</span>
+                      </div>
+                    </td>
 
-          {trackers.length === 0 && (
-            <div className="text-center text-gray-500 py-12">
-              No websites yet. Add one above!
-            </div>
-          )}
+                    {/* Source / Referrer */}
+                    <td className="p-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">{source.icon}</span>
+                        <span className="text-blue-300 font-medium">{source.name}</span>
+                      </div>
+                      <div className="text-xs text-gray-600 max-w-[200px] truncate mt-1" title={visit.url}>
+                        {visit.url.replace(/^https?:\/\//, '')}
+                      </div>
+                    </td>
+
+                    {/* Device */}
+                    <td className="p-4 text-gray-500 font-medium">
+                      {visit.user_agent?.includes('iPhone') ? '📱 iPhone' :
+                       visit.user_agent?.includes('Android') ? '🤖 Android' :
+                       visit.user_agent?.includes('Windows') ? '💻 Windows' :
+                       visit.user_agent?.includes('Mac') ? '🍎 Mac' : 'Unknown'}
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {visits.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="p-8 text-center text-gray-600 italic">
+                    Waiting for data... Paste the code above into your site to start tracking!
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
-
       </div>
     </main>
   );
