@@ -27,14 +27,32 @@ export default function UserDashboard() {
 
   useEffect(() => {
     const fetchData = async () => {
-      const { data: trackerData } = await supabase
+      // 1. GET USER FIRST
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+
+      // 2. CHECK OWNERSHIP (Security Fix)
+      // We explicitly ask for a tracker that matches BOTH the ID and the User ID.
+      const { data: trackerData, error } = await supabase
         .from('trackers')
         .select('name')
         .eq('id', TRACKER_ID)
+        .eq('user_id', user.id) // <--- THIS LINE LOCKS IT DOWN
         .single();
 
-      if (trackerData) setSiteName(trackerData.name);
+      // If no data is returned, it means this tracker doesn't belong to this user.
+      if (error || !trackerData) {
+        router.push('/dashboard'); // Kick them back to main menu
+        return;
+      }
 
+      setSiteName(trackerData.name);
+
+      // 3. FETCH VISITS (Only if ownership is verified)
       let startTime = new Date();
       if (timeRange === '24h') startTime.setDate(startTime.getDate() - 1);
       if (timeRange === '7d') startTime.setDate(startTime.getDate() - 7);
@@ -53,6 +71,7 @@ export default function UserDashboard() {
 
     fetchData();
 
+    // Realtime listener
     const channel = supabase
       .channel('dashboard_realtime')
       .on('postgres_changes', {
@@ -66,7 +85,7 @@ export default function UserDashboard() {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [TRACKER_ID, timeRange]);
+  }, [TRACKER_ID, timeRange, router]);
 
   // --- ANALYTICS HELPERS ---
   const groupData = (field: string) => {
@@ -81,18 +100,12 @@ export default function UserDashboard() {
   const deviceData = useMemo(() => groupData('device_type'), [visits]);
   const browserData = useMemo(() => groupData('browser'), [visits]);
 
-  // --- NEW: TOP REFERRERS LOGIC ---
   const topReferrers = useMemo(() => {
     const referrers: any = {};
     visits.forEach((v) => {
-      // Clean up the URL to show just the domain
       let domain = 'Direct / None';
       if (v.referer && v.referer !== 'Direct') {
-        try {
-          domain = new URL(v.referer).hostname;
-        } catch (e) {
-          domain = v.referer;
-        }
+        try { domain = new URL(v.referer).hostname; } catch (e) { domain = v.referer; }
       }
       referrers[domain] = (referrers[domain] || 0) + 1;
     });
@@ -104,7 +117,7 @@ export default function UserDashboard() {
 
   const toggleTheme = () => setIsDarkMode(!isDarkMode);
 
-  if (loading) return <div className="min-h-screen bg-black flex items-center justify-center text-white text-xl font-bold">⚡ Loading Dashboard...</div>;
+  if (loading) return <div className="min-h-screen bg-black flex items-center justify-center text-white text-xl font-bold">🔒 Verifying Access...</div>;
 
   return (
     <main className={`min-h-screen transition-all duration-500 p-6 flex flex-col items-center ${isDarkMode ? 'bg-black text-white' : 'bg-gray-50 text-gray-900'}`}>
@@ -131,21 +144,18 @@ export default function UserDashboard() {
 
       {/* Main Grid */}
       <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        {/* Visitor Counter */}
         <div className={`lg:col-span-1 border rounded-3xl p-8 flex flex-col justify-center transition-all ${isDarkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200 shadow-md'}`}>
            <h2 className="opacity-50 text-xs uppercase font-black tracking-widest mb-2">Total Visitors</h2>
            <span className="text-7xl font-black tracking-tighter tabular-nums">{visits.length}</span>
            <p className="text-green-500 text-xs font-bold mt-2 uppercase">● {siteName} is Live</p>
         </div>
-
-        {/* World Map */}
         <div className="lg:col-span-2 h-72 rounded-3xl overflow-hidden shadow-2xl">
            <WorldMap visits={visits} />
         </div>
       </div>
 
+      {/* Charts */}
       <div className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        {/* Device Chart */}
         <div className={`border rounded-2xl p-6 h-64 flex flex-col ${isDarkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200 shadow-sm'}`}>
           <h3 className="text-xs font-bold opacity-50 uppercase mb-4">📱 Device Split</h3>
           <ResponsiveContainer width="100%" height="100%">
@@ -158,7 +168,6 @@ export default function UserDashboard() {
           </ResponsiveContainer>
         </div>
 
-        {/* --- NEW: TOP REFERRERS SECTION --- */}
         <div className={`border rounded-2xl p-6 h-64 flex flex-col ${isDarkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200 shadow-sm'}`}>
           <h3 className="text-xs font-bold opacity-50 uppercase mb-4">🔗 Top Referrers</h3>
           <div className="flex flex-col gap-3">
@@ -172,7 +181,6 @@ export default function UserDashboard() {
           </div>
         </div>
 
-        {/* Browser Chart */}
         <div className={`border rounded-2xl p-6 h-64 flex flex-col ${isDarkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200 shadow-sm'}`}>
           <h3 className="text-xs font-bold opacity-50 uppercase mb-4">🌐 Browsers</h3>
           <ResponsiveContainer width="100%" height="100%">
@@ -183,38 +191,6 @@ export default function UserDashboard() {
               <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', background: isDarkMode ? '#000' : '#fff' }} />
             </PieChart>
           </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* Activity Table */}
-      <div className={`w-full max-w-6xl border rounded-2xl overflow-hidden ${isDarkMode ? 'bg-gray-900 border-gray-800 shadow-xl' : 'bg-white border-gray-200 shadow-sm'}`}>
-        <div className={`p-4 border-b ${isDarkMode ? 'border-gray-800 bg-gray-900/50' : 'border-gray-100 bg-gray-50'}`}>
-           <h3 className="font-bold text-xs uppercase opacity-60 tracking-widest">Real-time Visitor Log</h3>
-        </div>
-        <div className="max-h-[300px] overflow-y-auto font-mono text-xs">
-          <table className="w-full text-left">
-            <thead className={`uppercase font-bold tracking-tighter ${isDarkMode ? 'bg-gray-800 text-gray-500' : 'bg-gray-100 text-gray-400'}`}>
-              <tr>
-                <th className="p-4">Time</th>
-                <th className="p-4">Origin</th>
-                <th className="p-4">System</th>
-                <th className="p-4">Target</th>
-              </tr>
-            </thead>
-            <tbody className={`divide-y ${isDarkMode ? 'divide-gray-800' : 'divide-gray-100'}`}>
-              {visits.slice(0, 10).map((v) => (
-                <tr key={v.id} className="hover:bg-green-500/5 transition-colors">
-                  <td className="p-4 opacity-40">{formatDistanceStrict(new Date(v.created_at), new Date())} ago</td>
-                  <td className="p-4 flex items-center gap-2">
-                    {v.country ? <img src={`https://flagcdn.com/16x12/${v.country.toLowerCase()}.png`} alt="flag" /> : '🌍'}
-                    <span className="font-bold">{v.country || 'Unknown'}</span>
-                  </td>
-                  <td className="p-4 opacity-60">{v.os} / {v.browser}</td>
-                  <td className="p-4 truncate max-w-[150px] text-green-500">{v.url.split('/').pop() || 'Home'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       </div>
 
