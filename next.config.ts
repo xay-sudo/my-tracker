@@ -1,11 +1,13 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  // Keep this to ignore Type errors
-  typescript: {
-    ignoreBuildErrors: true,
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  experimental: {
+    ppr: true, // Enable Partial Prerendering
   },
-  // ❌ REMOVED the 'eslint' block because it causes the error
+  images: {
+    remotePatterns: [
+      { hostname: 'flagcdn.com' }, // Optimize flag images
+    ],
+  },
 };
 
-export default nextConfig;
+module.exports = nextConfig;
