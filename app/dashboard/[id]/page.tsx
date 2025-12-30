@@ -5,9 +5,8 @@ import { useEffect, useState, useMemo } from 'react';
 import { formatDistanceStrict } from 'date-fns';
 import { useParams, useRouter } from 'next/navigation';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
-import dynamic from 'next/dynamic'; // Optimization: Dynamic import for Map
+import dynamic from 'next/dynamic';
 
-// Optimization: Load map only when needed to speed up page
 const WorldMap = dynamic(() => import('../../components/WorldMap'), {
   ssr: false,
   loading: () => <div className="w-full h-full bg-gray-900/50 animate-pulse rounded-3xl" />
@@ -27,13 +26,14 @@ export default function UserDashboard() {
 
   const [visits, setVisits] = useState<any[]>([]);
   const [siteName, setSiteName] = useState('Loading...');
+  // Default to 24h, but now we have a 'live' option too
   const [timeRange, setTimeRange] = useState('24h');
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
-      // 1. GET USER & VERIFY ACCESS
+      // 1. VERIFY USER
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push('/login'); return; }
 
@@ -41,19 +41,27 @@ export default function UserDashboard() {
         .from('trackers')
         .select('name')
         .eq('id', TRACKER_ID)
-        .eq('user_id', user.id) // Security Check
+        .eq('user_id', user.id)
         .single();
 
       if (error || !trackerData) { router.push('/dashboard'); return; }
-
       setSiteName(trackerData.name);
 
-      // 2. FETCH VISITS
+      // 2. SET TIME WINDOW
       let startTime = new Date();
-      if (timeRange === '24h') startTime.setDate(startTime.getDate() - 1);
-      if (timeRange === '7d') startTime.setDate(startTime.getDate() - 7);
-      if (timeRange === '30d') startTime.setDate(startTime.getDate() - 30);
 
+      if (timeRange === 'live') {
+        // Live Mode = Last 30 Minutes
+        startTime.setMinutes(startTime.getMinutes() - 30);
+      } else if (timeRange === '24h') {
+        startTime.setDate(startTime.getDate() - 1);
+      } else if (timeRange === '7d') {
+        startTime.setDate(startTime.getDate() - 7);
+      } else if (timeRange === '30d') {
+        startTime.setDate(startTime.getDate() - 30);
+      }
+
+      // 3. FETCH DATA
       const { data } = await supabase
         .from('visits')
         .select('*')
@@ -67,7 +75,7 @@ export default function UserDashboard() {
 
     fetchData();
 
-    // Realtime Listener
+    // 4. REALTIME LISTENER (Keeps 'Live' mode updated)
     const channel = supabase.channel('dashboard_realtime')
       .on('postgres_changes', {
         event: 'INSERT',
@@ -75,6 +83,7 @@ export default function UserDashboard() {
         table: 'visits',
         filter: `tracker_id=eq.${TRACKER_ID}`
       }, (payload) => {
+        // When a new visit comes in, add it to the top
         setVisits((prev) => [payload.new, ...prev]);
       })
       .subscribe();
@@ -112,7 +121,7 @@ export default function UserDashboard() {
 
   const toggleTheme = () => setIsDarkMode(!isDarkMode);
 
-  if (loading) return <div className="min-h-screen bg-black flex items-center justify-center text-white text-xl font-bold">🔒 Verifying Access...</div>;
+  if (loading) return <div className="min-h-screen bg-black flex items-center justify-center text-white font-bold">Connecting...</div>;
 
   return (
     <main className={`min-h-screen transition-all duration-500 p-6 flex flex-col items-center ${isDarkMode ? 'bg-black text-white' : 'bg-gray-50 text-gray-900'}`}>
@@ -121,43 +130,31 @@ export default function UserDashboard() {
       <div className={`w-full max-w-6xl flex flex-col md:flex-row justify-between items-start md:items-center mb-8 pb-4 border-b ${isDarkMode ? 'border-gray-800' : 'border-gray-200'}`}>
 
         <div className="flex items-center gap-4 mb-4 md:mb-0">
-          <button
-            onClick={() => router.push('/')}
-            className="flex items-center gap-2 group hover:opacity-80 transition-opacity"
-            title="Go to Homepage"
-          >
-            <span className="text-2xl group-hover:scale-110 transition-transform">⚡</span>
+          <button onClick={() => router.push('/')} className="flex items-center gap-2 group hover:opacity-80 transition-opacity">
+            <span className="text-2xl">⚡</span>
             <h1 className="text-2xl font-black text-green-500 tracking-tight italic">SUPER TRACKER</h1>
           </button>
-
-          <button
-            onClick={toggleTheme}
-            className={`p-2 rounded-full border ${isDarkMode ? 'border-gray-800 bg-gray-900 text-yellow-400' : 'border-gray-300 bg-white text-indigo-600 shadow-sm'}`}
-          >
+          <button onClick={toggleTheme} className={`p-2 rounded-full border ${isDarkMode ? 'border-gray-800 bg-gray-900 text-yellow-400' : 'border-gray-300 bg-white text-indigo-600 shadow-sm'}`}>
             {isDarkMode ? '☀️' : '🌙'}
           </button>
         </div>
 
         <div className="flex items-center gap-3 w-full md:w-auto">
-          <select value={timeRange} onChange={(e) => setTimeRange(e.target.value)} className={`flex-1 md:flex-none p-2 rounded-lg outline-none ${isDarkMode ? 'bg-gray-900 border-gray-700 text-white' : 'bg-white border-gray-300 text-black shadow-sm'}`}>
+
+          {/* UPDATED DROPDOWN */}
+          <select
+            value={timeRange}
+            onChange={(e) => setTimeRange(e.target.value)}
+            className={`flex-1 md:flex-none p-2 rounded-lg outline-none font-bold ${isDarkMode ? 'bg-gray-900 border-gray-700 text-white' : 'bg-white border-gray-300 text-black shadow-sm'}`}
+          >
+            <option value="live">🔴 Live Realtime</option>
             <option value="24h">Last 24 Hours</option>
             <option value="7d">Last 7 Days</option>
             <option value="30d">Last 30 Days</option>
           </select>
 
-          <button
-            onClick={() => router.push(`/dashboard/${TRACKER_ID}/settings`)}
-            className={`px-4 py-2 rounded-lg text-sm font-bold border transition-all ${isDarkMode ? 'border-gray-800 hover:bg-gray-800' : 'border-gray-300 hover:bg-gray-100'}`}
-          >
-            ⚙️ Settings
-          </button>
-
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="flex items-center gap-1 text-sm opacity-50 hover:opacity-100 border border-transparent hover:border-gray-700 px-3 py-2 rounded-lg transition-all"
-          >
-            <span>←</span> Back to List
-          </button>
+          <button onClick={() => router.push(`/dashboard/${TRACKER_ID}/settings`)} className={`px-4 py-2 rounded-lg text-sm font-bold border transition-all ${isDarkMode ? 'border-gray-800 hover:bg-gray-800' : 'border-gray-300 hover:bg-gray-100'}`}>⚙️ Settings</button>
+          <button onClick={() => router.push('/dashboard')} className="flex items-center gap-1 text-sm opacity-50 hover:opacity-100 border border-transparent hover:border-gray-700 px-3 py-2 rounded-lg transition-all">Back</button>
         </div>
       </div>
 
@@ -166,7 +163,19 @@ export default function UserDashboard() {
         <div className={`lg:col-span-1 border rounded-3xl p-8 flex flex-col justify-center transition-all ${isDarkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200 shadow-md'}`}>
            <h2 className="opacity-50 text-xs uppercase font-black tracking-widest mb-2">Total Visitors</h2>
            <span className="text-7xl font-black tracking-tighter tabular-nums">{visits.length}</span>
-           <p className="text-green-500 text-xs font-bold mt-2 uppercase">● {siteName} is Live</p>
+
+           <div className="flex items-center gap-2 mt-2">
+             {timeRange === 'live' && (
+               <span className="relative flex h-2 w-2">
+                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                 <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+               </span>
+             )}
+             <p className={`${timeRange === 'live' ? 'text-red-500' : 'text-green-500'} text-xs font-bold uppercase`}>
+               ● {timeRange === 'live' ? 'Live Mode Active' : `${siteName} is Live`}
+             </p>
+           </div>
+
         </div>
         <div className="lg:col-span-2 h-72 rounded-3xl overflow-hidden shadow-2xl">
            <WorldMap visits={visits} />
@@ -213,7 +222,7 @@ export default function UserDashboard() {
         </div>
       </div>
 
-      {/* --- VISITOR LOG (ADDED BACK) --- */}
+      {/* --- VISITOR LOG --- */}
       <div className={`w-full max-w-6xl border rounded-2xl overflow-hidden transition-all ${isDarkMode ? 'bg-gray-900 border-gray-800 shadow-xl' : 'bg-white border-gray-200 shadow-sm'}`}>
         <div className={`p-4 border-b ${isDarkMode ? 'border-gray-800 bg-gray-900/50' : 'border-gray-100 bg-gray-50'}`}>
            <h3 className="font-bold text-xs uppercase opacity-60 tracking-widest">Real-time Visitor Log</h3>
@@ -235,13 +244,7 @@ export default function UserDashboard() {
                     {formatDistanceStrict(new Date(visit.created_at), new Date())} ago
                   </td>
                   <td className="p-4 flex items-center gap-3 font-medium">
-                    {visit.country ? (
-                      <img
-                        src={`https://flagcdn.com/20x15/${visit.country.toLowerCase()}.png`}
-                        className="rounded-sm shadow-sm"
-                        alt={visit.country}
-                      />
-                    ) : '🌍'}
+                    {visit.country ? <img src={`https://flagcdn.com/20x15/${visit.country.toLowerCase()}.png`} className="rounded-sm shadow-sm" alt={visit.country} /> : '🌍'}
                     <span>{visit.country || 'Global'}</span>
                   </td>
                   <td className="p-4 opacity-70 text-[11px] font-mono">
@@ -254,9 +257,7 @@ export default function UserDashboard() {
               ))}
             </tbody>
           </table>
-          {visits.length === 0 && (
-            <div className="p-20 text-center opacity-30 italic">No data collected for this period yet.</div>
-          )}
+          {visits.length === 0 && <div className="p-20 text-center opacity-30 italic">No data available for this time range.</div>}
         </div>
       </div>
 
