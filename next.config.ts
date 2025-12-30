@@ -1,11 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    ppr: true, // Enable Partial Prerendering
-  },
+  // experimental: {
+  //   ppr: true, <--- REMOVE THIS LINE (It caused the error)
+  // },
   images: {
     remotePatterns: [
-      { hostname: 'flagcdn.com' }, // Optimize flag images
+      { hostname: 'flagcdn.com' },
     ],
   },
 };
