@@ -4,9 +4,10 @@ import { createClient } from '@supabase/supabase-js';
 import { useEffect, useState, useMemo } from 'react';
 import { formatDistanceStrict } from 'date-fns';
 import { useParams, useRouter } from 'next/navigation';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import dynamic from 'next/dynamic';
 
+// Optimization: Load map only when needed to speed up page load
 const WorldMap = dynamic(() => import('../../components/WorldMap'), {
   ssr: false,
   loading: () => <div className="w-full h-full bg-gray-900/50 animate-pulse rounded-3xl" />
@@ -26,14 +27,13 @@ export default function UserDashboard() {
 
   const [visits, setVisits] = useState<any[]>([]);
   const [siteName, setSiteName] = useState('Loading...');
-  // Default to 24h, but now we have a 'live' option too
   const [timeRange, setTimeRange] = useState('24h');
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
-      // 1. VERIFY USER
+      // 1. VERIFY USER & OWNERSHIP
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push('/login'); return; }
 
@@ -49,10 +49,8 @@ export default function UserDashboard() {
 
       // 2. SET TIME WINDOW
       let startTime = new Date();
-
       if (timeRange === 'live') {
-        // Live Mode = Last 30 Minutes
-        startTime.setMinutes(startTime.getMinutes() - 30);
+        startTime.setMinutes(startTime.getMinutes() - 30); // Last 30 mins
       } else if (timeRange === '24h') {
         startTime.setDate(startTime.getDate() - 1);
       } else if (timeRange === '7d') {
@@ -75,7 +73,7 @@ export default function UserDashboard() {
 
     fetchData();
 
-    // 4. REALTIME LISTENER (Keeps 'Live' mode updated)
+    // 4. REALTIME LISTENER
     const channel = supabase.channel('dashboard_realtime')
       .on('postgres_changes', {
         event: 'INSERT',
@@ -83,7 +81,6 @@ export default function UserDashboard() {
         table: 'visits',
         filter: `tracker_id=eq.${TRACKER_ID}`
       }, (payload) => {
-        // When a new visit comes in, add it to the top
         setVisits((prev) => [payload.new, ...prev]);
       })
       .subscribe();
@@ -140,8 +137,6 @@ export default function UserDashboard() {
         </div>
 
         <div className="flex items-center gap-3 w-full md:w-auto">
-
-          {/* UPDATED DROPDOWN */}
           <select
             value={timeRange}
             onChange={(e) => setTimeRange(e.target.value)}
@@ -175,7 +170,6 @@ export default function UserDashboard() {
                ● {timeRange === 'live' ? 'Live Mode Active' : `${siteName} is Live`}
              </p>
            </div>
-
         </div>
         <div className="lg:col-span-2 h-72 rounded-3xl overflow-hidden shadow-2xl">
            <WorldMap visits={visits} />
@@ -184,24 +178,50 @@ export default function UserDashboard() {
 
       {/* --- CHARTS ROW --- */}
       <div className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div className={`border rounded-2xl p-6 h-64 flex flex-col ${isDarkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200 shadow-sm'}`}>
+
+        {/* 1. DEVICE CHART (With Legend) */}
+        <div className={`border rounded-2xl p-6 h-80 flex flex-col ${isDarkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200 shadow-sm'}`}>
           <h3 className="text-xs font-bold opacity-50 uppercase mb-4">📱 Device Split</h3>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <Pie data={deviceData} cx="50%" cy="50%" innerRadius={45} outerRadius={60} paddingAngle={5} dataKey="value">
-                {deviceData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+              <Pie
+                data={deviceData}
+                cx="50%"
+                cy="45%"
+                innerRadius={60}
+                outerRadius={80}
+                paddingAngle={5}
+                dataKey="value"
+              >
+                {deviceData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                ))}
               </Pie>
-              <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', background: isDarkMode ? '#000' : '#fff' }} />
+              <Tooltip
+                contentStyle={{ borderRadius: '12px', border: 'none', background: isDarkMode ? '#1f2937' : '#fff', color: isDarkMode ? '#fff' : '#000' }}
+              />
+              <Legend
+                verticalAlign="bottom"
+                height={36}
+                iconType="circle"
+                formatter={(value) => <span style={{ color: isDarkMode ? '#9ca3af' : '#4b5563', fontSize: '12px', fontWeight: 'bold' }}>{value}</span>}
+              />
             </PieChart>
           </ResponsiveContainer>
         </div>
 
-        <div className={`border rounded-2xl p-6 h-64 flex flex-col ${isDarkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200 shadow-sm'}`}>
+        {/* 2. TOP REFERRERS */}
+        <div className={`border rounded-2xl p-6 h-80 flex flex-col ${isDarkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200 shadow-sm'}`}>
           <h3 className="text-xs font-bold opacity-50 uppercase mb-4">🔗 Top Referrers</h3>
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 overflow-y-auto pr-2">
             {topReferrers.map((ref, i) => (
               <div key={i} className="flex justify-between items-center group">
-                <span className="text-xs font-medium truncate max-w-[150px] group-hover:text-green-500 transition-colors">{ref.name}</span>
+                <div className="flex items-center gap-2 overflow-hidden">
+                   <span className="text-gray-500 text-[10px] font-mono">#{i + 1}</span>
+                   <span className="text-xs font-medium truncate group-hover:text-green-500 transition-colors" title={ref.name}>
+                     {ref.name}
+                   </span>
+                </div>
                 <span className={`text-[10px] font-bold px-2 py-1 rounded ${isDarkMode ? 'bg-gray-800' : 'bg-gray-100'}`}>{ref.value}</span>
               </div>
             ))}
@@ -209,17 +229,37 @@ export default function UserDashboard() {
           </div>
         </div>
 
-        <div className={`border rounded-2xl p-6 h-64 flex flex-col ${isDarkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200 shadow-sm'}`}>
+        {/* 3. BROWSER CHART (With Legend) */}
+        <div className={`border rounded-2xl p-6 h-80 flex flex-col ${isDarkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200 shadow-sm'}`}>
           <h3 className="text-xs font-bold opacity-50 uppercase mb-4">🌐 Browsers</h3>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <Pie data={browserData} cx="50%" cy="50%" innerRadius={45} outerRadius={60} paddingAngle={5} dataKey="value">
-                {browserData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+              <Pie
+                data={browserData}
+                cx="50%"
+                cy="45%"
+                innerRadius={60}
+                outerRadius={80}
+                paddingAngle={5}
+                dataKey="value"
+              >
+                {browserData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                ))}
               </Pie>
-              <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', background: isDarkMode ? '#000' : '#fff' }} />
+              <Tooltip
+                contentStyle={{ borderRadius: '12px', border: 'none', background: isDarkMode ? '#1f2937' : '#fff', color: isDarkMode ? '#fff' : '#000' }}
+              />
+              <Legend
+                verticalAlign="bottom"
+                height={36}
+                iconType="circle"
+                formatter={(value) => <span style={{ color: isDarkMode ? '#9ca3af' : '#4b5563', fontSize: '12px', fontWeight: 'bold' }}>{value}</span>}
+              />
             </PieChart>
           </ResponsiveContainer>
         </div>
+
       </div>
 
       {/* --- VISITOR LOG --- */}
