@@ -27,32 +27,22 @@ export default function UserDashboard() {
 
   useEffect(() => {
     const fetchData = async () => {
-      // 1. GET USER FIRST
+      // 1. GET USER & VERIFY ACCESS
       const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { router.push('/login'); return; }
 
-      if (!user) {
-        router.push('/login');
-        return;
-      }
-
-      // 2. CHECK OWNERSHIP (Security Fix)
-      // We explicitly ask for a tracker that matches BOTH the ID and the User ID.
       const { data: trackerData, error } = await supabase
         .from('trackers')
         .select('name')
         .eq('id', TRACKER_ID)
-        .eq('user_id', user.id) // <--- THIS LINE LOCKS IT DOWN
+        .eq('user_id', user.id) // Security Check
         .single();
 
-      // If no data is returned, it means this tracker doesn't belong to this user.
-      if (error || !trackerData) {
-        router.push('/dashboard'); // Kick them back to main menu
-        return;
-      }
+      if (error || !trackerData) { router.push('/dashboard'); return; }
 
       setSiteName(trackerData.name);
 
-      // 3. FETCH VISITS (Only if ownership is verified)
+      // 2. FETCH VISITS
       let startTime = new Date();
       if (timeRange === '24h') startTime.setDate(startTime.getDate() - 1);
       if (timeRange === '7d') startTime.setDate(startTime.getDate() - 7);
@@ -71,9 +61,8 @@ export default function UserDashboard() {
 
     fetchData();
 
-    // Realtime listener
-    const channel = supabase
-      .channel('dashboard_realtime')
+    // Realtime Listener
+    const channel = supabase.channel('dashboard_realtime')
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
@@ -122,23 +111,51 @@ export default function UserDashboard() {
   return (
     <main className={`min-h-screen transition-all duration-500 p-6 flex flex-col items-center ${isDarkMode ? 'bg-black text-white' : 'bg-gray-50 text-gray-900'}`}>
 
-      {/* Header */}
+      {/* --- UPDATED HEADER --- */}
       <div className={`w-full max-w-6xl flex flex-col md:flex-row justify-between items-start md:items-center mb-8 pb-4 border-b ${isDarkMode ? 'border-gray-800' : 'border-gray-200'}`}>
+
+        {/* LOGO AREA (Clickable) */}
         <div className="flex items-center gap-4 mb-4 md:mb-0">
-          <h1 className="text-2xl font-black text-green-500 tracking-tight italic">SUPER TRACKER</h1>
-          <button onClick={toggleTheme} className={`p-2 rounded-full border ${isDarkMode ? 'border-gray-800 bg-gray-900 text-yellow-400' : 'border-gray-300 bg-white text-indigo-600 shadow-sm'}`}>
+          <button
+            onClick={() => router.push('/')}
+            className="flex items-center gap-2 group hover:opacity-80 transition-opacity"
+            title="Go to Homepage"
+          >
+            <span className="text-2xl group-hover:scale-110 transition-transform">⚡</span>
+            <h1 className="text-2xl font-black text-green-500 tracking-tight italic">SUPER TRACKER</h1>
+          </button>
+
+          {/* Theme Toggle */}
+          <button
+            onClick={toggleTheme}
+            className={`p-2 rounded-full border ${isDarkMode ? 'border-gray-800 bg-gray-900 text-yellow-400' : 'border-gray-300 bg-white text-indigo-600 shadow-sm'}`}
+          >
             {isDarkMode ? '☀️' : '🌙'}
           </button>
         </div>
 
+        {/* RIGHT CONTROLS */}
         <div className="flex items-center gap-3 w-full md:w-auto">
           <select value={timeRange} onChange={(e) => setTimeRange(e.target.value)} className={`flex-1 md:flex-none p-2 rounded-lg outline-none ${isDarkMode ? 'bg-gray-900 border-gray-700 text-white' : 'bg-white border-gray-300 text-black shadow-sm'}`}>
             <option value="24h">Last 24 Hours</option>
             <option value="7d">Last 7 Days</option>
             <option value="30d">Last 30 Days</option>
           </select>
-          <button onClick={() => router.push(`/dashboard/${TRACKER_ID}/settings`)} className={`px-4 py-2 rounded-lg text-sm font-bold border transition-all ${isDarkMode ? 'border-gray-800 hover:bg-gray-800' : 'border-gray-300 hover:bg-gray-100'}`}>⚙️ Settings</button>
-          <button onClick={() => router.push('/dashboard')} className="text-sm opacity-50 hover:opacity-100">Back</button>
+
+          <button
+            onClick={() => router.push(`/dashboard/${TRACKER_ID}/settings`)}
+            className={`px-4 py-2 rounded-lg text-sm font-bold border transition-all ${isDarkMode ? 'border-gray-800 hover:bg-gray-800' : 'border-gray-300 hover:bg-gray-100'}`}
+          >
+            ⚙️ Settings
+          </button>
+
+          {/* BACK BUTTON (Now clearly labeled) */}
+          <button
+            onClick={() => router.push('/dashboard')}
+            className="flex items-center gap-1 text-sm opacity-50 hover:opacity-100 border border-transparent hover:border-gray-700 px-3 py-2 rounded-lg transition-all"
+          >
+            <span>←</span> Back to List
+          </button>
         </div>
       </div>
 
