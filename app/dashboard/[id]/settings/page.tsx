@@ -12,7 +12,9 @@ const supabase = createClient(
 export default function ProjectSettings() {
   const params = useParams();
   const router = useRouter();
-  const TRACKER_ID = params.id as string;
+
+  // Handle case where params.id might be an array
+  const TRACKER_ID = Array.isArray(params.id) ? params.id[0] : params.id;
 
   const [siteName, setSiteName] = useState('');
   const [loading, setLoading] = useState(true);
@@ -21,6 +23,8 @@ export default function ProjectSettings() {
   const [isDarkMode, setIsDarkMode] = useState(true);
 
   useEffect(() => {
+    if (!TRACKER_ID) return;
+
     const fetchProject = async () => {
       const { data, error } = await supabase
         .from('trackers')
@@ -31,7 +35,6 @@ export default function ProjectSettings() {
       if (data) {
         setSiteName(data.name);
       } else if (error) {
-        // If tracker doesn't exist, go back
         router.push('/dashboard');
       }
       setLoading(false);
@@ -54,11 +57,14 @@ export default function ProjectSettings() {
     } else {
       setMessage('✅ Settings updated successfully!');
 
-      // --- FIX ADDED HERE ---
-      // 1. Force Next.js to refresh the current route (clears cache)
+      // --- THIS IS THE CRITICAL FIX ---
+      // 1. Force Next.js to clear the cache and re-fetch data
       router.refresh();
-      // 2. Optional: If you want to force update the local state immediately (redundant but safe)
-      // setSiteName(siteName);
+
+      // 2. Add a small timeout to ensure the database is ready before any navigation
+      setTimeout(() => {
+         router.refresh();
+      }, 500);
     }
     setSaving(false);
   };
@@ -125,7 +131,7 @@ export default function ProjectSettings() {
             onClick={async () => {
               if (confirm('Permanently delete this tracker?')) {
                 await supabase.from('trackers').delete().eq('id', TRACKER_ID);
-                router.refresh(); // Refresh before pushing to clear cache
+                router.refresh();
                 router.push('/dashboard');
               }
             }}
