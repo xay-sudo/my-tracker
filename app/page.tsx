@@ -4,8 +4,19 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 import { useEffect, useState } from 'react';
 import { formatDistanceStrict } from 'date-fns';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
+// Assuming WorldMap is in the same folder structure. If it fails, check the path.
 import WorldMap from './components/WorldMap';
+
+// --- 1. Added Type Definitions (Fixes "any" errors) ---
+interface Visit {
+  id: number;
+  created_at: string;
+  country: string | null;
+  city?: string | null;
+  device?: string | null;
+  tracker_id: string;
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -13,6 +24,7 @@ const supabase = createClient(
 );
 
 const DEMO_ID = 'homepage-live-demo';
+const LIVE_URL = 'https://my-tracker-two.vercel.app'; // Your actual Vercel URL
 const COLORS = ['#22c55e', '#3b82f6', '#eab308', '#ef4444', '#a855f7'];
 
 const MOCK_DEVICES = [
@@ -25,36 +37,44 @@ export default function Home() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [onlineCount, setOnlineCount] = useState(0);
-  const [recentPings, setRecentPings] = useState<any[]>([]);
-  const [demoVisits, setDemoVisits] = useState<any[]>([]);
+  // --- 2. Applied Types here ---
+  const [recentPings, setRecentPings] = useState<Visit[]>([]);
+  const [demoVisits, setDemoVisits] = useState<Visit[]>([]);
   const [isDarkMode, setIsDarkMode] = useState(true);
 
   useEffect(() => {
+    // 1. Check User Session
     const checkUser = async () => {
       const { data: { user: activeUser } } = await supabase.auth.getUser();
       setUser(activeUser);
     };
     checkUser();
 
+    // 2. Track Self (The current visitor)
     fetch('/api/track', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         tracker_id: DEMO_ID,
-        url: window.location.href,
-        referrer: document.referrer
+        url: typeof window !== 'undefined' ? window.location.href : '',
+        referrer: typeof document !== 'undefined' ? document.referrer : ''
       })
-    });
+    }).catch(err => console.error("Tracking failed:", err));
 
+    // 3. Fetch Initial Data (Last 5 mins & Recent 20)
     const fetchInitialData = async () => {
       const fiveMins = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+      // Get count
       const { count } = await supabase
         .from('visits')
         .select('*', { count: 'exact', head: true })
         .eq('tracker_id', DEMO_ID)
         .gt('created_at', fiveMins);
+
       if (count !== null) setOnlineCount(count);
 
+      // Get recent visits
       const { data } = await supabase
         .from('visits')
         .select('*')
@@ -69,6 +89,7 @@ export default function Home() {
     };
     fetchInitialData();
 
+    // 4. Realtime Subscription
     const channel = supabase.channel('homepage_realtime')
       .on('postgres_changes', {
         event: 'INSERT',
@@ -76,9 +97,10 @@ export default function Home() {
         table: 'visits',
         filter: `tracker_id=eq.${DEMO_ID}`
       }, (payload) => {
-        setOnlineCount(p => p + 1);
-        setRecentPings(prev => [payload.new, ...prev].slice(0, 5));
-        setDemoVisits(prev => [payload.new, ...prev].slice(0, 20));
+        const newVisit = payload.new as Visit;
+        setOnlineCount(prev => prev + 1);
+        setRecentPings(prev => [newVisit, ...prev].slice(0, 5));
+        setDemoVisits(prev => [newVisit, ...prev].slice(0, 20));
       })
       .subscribe();
 
@@ -87,9 +109,10 @@ export default function Home() {
 
   const toggleTheme = () => setIsDarkMode(!isDarkMode);
 
+  // --- 3. Fixed Installation Snippet with REAL URL ---
   const installSnippet = `<script>
 (function() {
-  fetch('https://your-site.vercel.app/api/track', {
+  fetch('${LIVE_URL}/api/track', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ 
@@ -171,16 +194,19 @@ export default function Home() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+               {/* Live Visitors Card */}
                <div className={`col-span-1 rounded-2xl p-6 flex flex-col justify-center border ${isDarkMode ? 'bg-black border-gray-800' : 'bg-gray-50 border-gray-200'}`}>
                   <span className="text-xs uppercase font-bold opacity-50 mb-2">Live Visitors</span>
                   <span className="text-6xl font-black tracking-tighter">{onlineCount}</span>
                </div>
 
+               {/* Map Card */}
                <div className="col-span-2 h-64 rounded-2xl overflow-hidden relative">
                   <WorldMap visits={demoVisits} />
                   <div className="absolute inset-0 pointer-events-none border rounded-2xl opacity-10"></div>
                </div>
 
+               {/* Devices Card */}
                <div className={`col-span-1 h-64 rounded-2xl p-4 border flex flex-col ${isDarkMode ? 'bg-black border-gray-800' : 'bg-gray-50 border-gray-200'}`}>
                   <span className="text-xs uppercase font-bold opacity-50 mb-2">Device Usage</span>
                   <ResponsiveContainer width="100%" height="100%">
@@ -192,16 +218,23 @@ export default function Home() {
                   </ResponsiveContainer>
                </div>
 
+               {/* Activity Log */}
                <div className={`col-span-2 h-64 rounded-2xl p-4 border overflow-hidden ${isDarkMode ? 'bg-black border-gray-800' : 'bg-gray-50 border-gray-200'}`}>
                   <span className="text-xs uppercase font-bold opacity-50 mb-4 block">Recent Activity</span>
                   <div className="space-y-3">
                     {recentPings.map((ping, i) => (
-                      <div key={ping.id} className="flex items-center justify-between opacity-80 text-sm">
+                      <div key={ping.id || i} className="flex items-center justify-between opacity-80 text-sm">
                         <div className="flex items-center gap-2">
-                           {ping.country ? <img src={`https://flagcdn.com/16x12/${ping.country.toLowerCase()}.png`} alt="flag" /> : '🌍'}
+                           {ping.country ? (
+                             // eslint-disable-next-line @next/next/no-img-element
+                             <img src={`https://flagcdn.com/16x12/${ping.country.toLowerCase()}.png`} alt={ping.country} />
+                           ) : '🌍'}
                            <span>New visitor from {ping.country || 'Unknown'}</span>
                         </div>
-                        <span className="font-mono text-xs opacity-50">{formatDistanceStrict(new Date(ping.created_at), new Date())} ago</span>
+                        <span className="font-mono text-xs opacity-50">
+                            {/* 4. Added Date Fallback to prevent crash */}
+                           {formatDistanceStrict(new Date(ping.created_at || new Date()), new Date())} ago
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -211,29 +244,34 @@ export default function Home() {
         </div>
       </section>
 
-      {/* --- LIVE FEED (Moved Up) --- */}
+      {/* --- LIVE FEED --- */}
       <div className="w-full max-w-md mb-32">
         <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] mb-4 opacity-30 italic">Global Activity Feed</h3>
         <div className="space-y-2">
           {recentPings.map((ping, i) => (
             <div
-              key={ping.id}
+              key={ping.id || i}
               className={`flex items-center justify-between p-3 rounded-xl border transition-all ${isDarkMode ? 'bg-gray-900/40 border-gray-800/50' : 'bg-white border-gray-200 shadow-sm'}`}
               style={{ opacity: 1 - (i * 0.15) }}
             >
               <div className="flex items-center gap-3">
-                <span className="text-xs">{ping.country ? <img src={`https://flagcdn.com/16x12/${ping.country.toLowerCase()}.png`} alt="flag" /> : '🌍'}</span>
+                <span className="text-xs">
+                    {ping.country ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={`https://flagcdn.com/16x12/${ping.country.toLowerCase()}.png`} alt={ping.country} />
+                    ) : '🌍'}
+                </span>
                 <span className="text-xs font-medium">Visitor from {ping.country || 'Unknown'}</span>
               </div>
               <span className="text-[10px] opacity-40 font-mono">
-                {formatDistanceStrict(new Date(ping.created_at), new Date())} ago
+                {formatDistanceStrict(new Date(ping.created_at || new Date()), new Date())} ago
               </span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* --- INSTALLATION GUIDE (Now at the Bottom) --- */}
+      {/* --- INSTALLATION GUIDE --- */}
       <section id="install" className="w-full max-w-4xl mb-24 text-left animate-fade-in-up">
         <div className={`p-8 md:p-12 rounded-[2.5rem] border ${isDarkMode ? 'bg-gray-900/50 border-gray-800' : 'bg-white border-gray-200 shadow-xl'}`}>
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8">
