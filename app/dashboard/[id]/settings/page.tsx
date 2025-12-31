@@ -31,6 +31,7 @@ export default function ProjectSettings() {
       if (data) {
         setSiteName(data.name);
       } else if (error) {
+        // If tracker doesn't exist, go back
         router.push('/dashboard');
       }
       setLoading(false);
@@ -52,6 +53,12 @@ export default function ProjectSettings() {
       setMessage('Error: ' + error.message);
     } else {
       setMessage('✅ Settings updated successfully!');
+
+      // --- FIX ADDED HERE ---
+      // 1. Force Next.js to refresh the current route (clears cache)
+      router.refresh();
+      // 2. Optional: If you want to force update the local state immediately (redundant but safe)
+      // setSiteName(siteName);
     }
     setSaving(false);
   };
@@ -118,6 +125,7 @@ export default function ProjectSettings() {
             onClick={async () => {
               if (confirm('Permanently delete this tracker?')) {
                 await supabase.from('trackers').delete().eq('id', TRACKER_ID);
+                router.refresh(); // Refresh before pushing to clear cache
                 router.push('/dashboard');
               }
             }}
